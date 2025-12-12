@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import {
   Select,
   Tag,
@@ -18,6 +18,11 @@ import {
 } from "@ant-design/icons";
 
 const API_BASE = "https://ifs-extractor.onrender.com";
+
+interface ApiInfo {
+  id: number;
+  name: string;
+}
 
 const HTTP_METHODS = ["GET", "PUT", "PATCH", "POST", "DELETE"] as const;
 type HttpMethod = (typeof HTTP_METHODS)[number];
@@ -65,6 +70,8 @@ interface EntityDetails {
 }
 
 const App = () => {
+  const [apis, setApis] = useState<ApiInfo[]>([]);
+  const [selectedApiId, setSelectedApiId] = useState<number | null>(null);
   const [selectedMethod, setSelectedMethod] = useState<HttpMethod | null>(null);
   const [entities, setEntities] = useState<EntityOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -84,8 +91,15 @@ const App = () => {
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => {
+    fetch(`${API_BASE}/api/list`)
+      .then((res) => res.json())
+      .then((data) => setApis(data.apis || []))
+      .catch((err) => console.error("Failed to fetch APIs:", err));
+  }, []);
+
   const fetchEntities = useCallback(
-    async (query: string, pageNum: number, method: string, append = false) => {
+    async (apiId: number, query: string, pageNum: number, method: string, append = false) => {
       setLoading(true);
       try {
         const params = new URLSearchParams({
@@ -94,7 +108,7 @@ const App = () => {
           page: String(pageNum),
           limit: String(PAGE_LIMIT),
         });
-        const res = await fetch(`${API_BASE}/api/entities/search?${params}`);
+        const res = await fetch(`${API_BASE}/api/${apiId}/entities/search?${params}`);
         const data = await res.json();
 
         const results = data.results || [];
@@ -110,6 +124,19 @@ const App = () => {
     []
   );
 
+  const handleApiChange = (apiId: number | undefined) => {
+    setSelectedApiId(apiId ?? null);
+    setSelectedMethod(null);
+    setEntities([]);
+    setSearchQuery("");
+    setPage(1);
+    setHasMore(false);
+    setEntityDetails(null);
+    setSelectedNestedEntity(null);
+    setSelectedEntityId(null);
+    setSelectedNestedEntityId(null);
+  };
+
   const handleMethodChange = (method: HttpMethod | undefined) => {
     setSelectedMethod(method ?? null);
     setEntities([]);
@@ -120,8 +147,8 @@ const App = () => {
     setSelectedNestedEntity(null);
     setSelectedEntityId(null);
     setSelectedNestedEntityId(null);
-    if (method) {
-      fetchEntities("", 1, method);
+    if (method && selectedApiId) {
+      fetchEntities(selectedApiId, "", 1, method);
     }
   };
 
@@ -134,8 +161,8 @@ const App = () => {
     }
 
     debounceRef.current = setTimeout(() => {
-      if (selectedMethod) {
-        fetchEntities(query, 1, selectedMethod);
+      if (selectedMethod && selectedApiId) {
+        fetchEntities(selectedApiId, query, 1, selectedMethod);
       }
     }, DEBOUNCE_MS);
   };
@@ -148,9 +175,10 @@ const App = () => {
       scrollHeight - scrollTop - clientHeight < 50 &&
       hasMore &&
       !loading &&
-      selectedMethod
+      selectedMethod &&
+      selectedApiId
     ) {
-      fetchEntities(searchQuery, page + 1, selectedMethod, true);
+      fetchEntities(selectedApiId, searchQuery, page + 1, selectedMethod, true);
     }
   };
 
@@ -159,14 +187,14 @@ const App = () => {
     setSelectedNestedEntity(null);
     setSelectedNestedEntityId(null);
 
-    if (!entityId) {
+    if (!entityId || !selectedApiId) {
       setEntityDetails(null);
       return;
     }
 
     setEntityLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/entity/${entityId}`);
+      const res = await fetch(`${API_BASE}/api/${selectedApiId}/entity/${entityId}`);
       const data = await res.json();
       setEntityDetails(data);
     } catch (err) {
@@ -313,7 +341,7 @@ const App = () => {
           IFS API Explorer
         </Title>
         <Text type="secondary" className="text-base">
-          Discover and explore IFS CustomerOrderHandling API entities
+          Discover and explore IFS API entities
         </Text>
       </div>
 
@@ -324,36 +352,56 @@ const App = () => {
               <Title level={4} className="!mb-6">
                 Search Configuration
               </Title>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div>
                   <Text strong className="text-base block mb-3">
-                    HTTP Method
+                    Select API
                   </Text>
                   <Select
-                    placeholder="Select HTTP Method"
+                    placeholder="Select an API"
                     className="w-full [&_.ant-select-selector]:!h-12 [&_.ant-select-selection-item]:!leading-[40px] [&_.ant-select-selection-placeholder]:!leading-[40px]"
                     size="large"
                     allowClear
-                    options={HTTP_METHODS.map((m) => ({
-                      label: (
-                        <Space size="middle" className="py-1">
-                          <Tag
-                            color={getMethodColor(m)}
-                            className="text-sm px-3 py-0.5"
-                          >
-                            {m}
-                          </Tag>
-                          <span>Method</span>
-                        </Space>
-                      ),
-                      value: m,
+                    options={apis.map((api) => ({
+                      label: api.name,
+                      value: api.id,
                     }))}
-                    onChange={handleMethodChange}
-                    value={selectedMethod}
+                    onChange={handleApiChange}
+                    value={selectedApiId}
                   />
                 </div>
 
-                {selectedMethod && (
+                {selectedApiId && (
+                  <div>
+                    <Text strong className="text-base block mb-3">
+                      HTTP Method
+                    </Text>
+                    <Select
+                      placeholder="Select HTTP Method"
+                      className="w-full [&_.ant-select-selector]:!h-12 [&_.ant-select-selection-item]:!leading-[40px] [&_.ant-select-selection-placeholder]:!leading-[40px]"
+                      size="large"
+                      allowClear
+                      options={HTTP_METHODS.map((m) => ({
+                        label: (
+                          <Space size="middle" className="py-1">
+                            <Tag
+                              color={getMethodColor(m)}
+                              className="text-sm px-3 py-0.5"
+                            >
+                              {m}
+                            </Tag>
+                            <span>Method</span>
+                          </Space>
+                        ),
+                        value: m,
+                      }))}
+                      onChange={handleMethodChange}
+                      value={selectedMethod}
+                    />
+                  </div>
+                )}
+
+                {selectedApiId && selectedMethod && (
                   <div>
                     <Text strong className="text-base block mb-3">
                       Entity Search
